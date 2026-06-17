@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import {
   Plus,
   ChevronLeft,
@@ -11,29 +11,32 @@ import {
   ChevronDown,
   ChevronUp,
   GripVertical,
+  Download,
+  Upload,
 } from "lucide-react";
 
 /* ================================================================== */
 /*  Config                                                             */
 /* ================================================================== */
 
-const STORAGE_KEY = "conform-kanban-v3";
+const STORAGE_KEY = "conform-kanban-v4";
 
 const COLUMNS = [
   { key: "backlog", label: "Backlog" },
-  { key: "todo", label: "To do" },
+  { key: "todo", label: "This Week" },
   { key: "doing", label: "In progress" },
   { key: "done", label: "Done" },
 ];
 
+/* Workstreams (the coloured lanes / filters) — business & project focused */
 const EPICS = {
-  research: { label: "Research", color: "#6D5BD0" },
-  design: { label: "Design", color: "#2A8C82" },
-  checks: { label: "Checks", color: "#2C6E49" },
-  scanning: { label: "Scanning", color: "#B0731A" },
-  log: { label: "Inspection log", color: "#2F6FB0" },
-  accounts: { label: "Accounts & data", color: "#5B6470" },
   launch: { label: "Launch", color: "#B23A6B" },
+  pitch: { label: "Pitch", color: "#6D5BD0" },
+  leadgen: { label: "Lead Gen", color: "#B0731A" },
+  crm: { label: "CRM", color: "#2F6FB0" },
+  product: { label: "Product", color: "#2A8C82" },
+  website: { label: "Website", color: "#2C6E49" },
+  business: { label: "Business", color: "#5B6470" },
 };
 
 const PRIORITY = { High: "#9B2C2C", Med: "#B0731A", Low: "#8A867D" };
@@ -43,55 +46,79 @@ const uid = () => Date.now().toString(36) + (_n++).toString(36);
 const card = (ref, title, desc, epic, priority, col) => ({ id: uid(), ref, title, desc, epic, priority, col });
 
 const DEFAULT_CARDS = [
-  // RESEARCH
-  card("R-1", "Saturday working session with the PM", "Sit with the project manager: which checks would they trust the app to do, which would they never, and which would they pay for. Walk them through the prototype.", "research", "High", "todo"),
-  card("R-2", "Check the 'contractor uploads, PM reviews' way of working", "Confirm with the PM on Saturday: does it match real life for the contractor to take and upload the photos, and the PM to read the report and decide where to focus on their visit?", "research", "High", "todo"),
-  card("R-3", "Choose the first check to launch with", "Pick ONE check to get really right for launch. Strong option: fire-stopping around pipes and cables — it's a legal must and has to be caught before it's plastered over.", "research", "High", "todo"),
-  card("R-4", "Talk to 5 PMs and contractors about defects caught too late", "Focus on things that were missed until after they were covered up and caused rework, failed inspections or warranty claims. Write down every answer.", "research", "Med", "backlog"),
-  card("R-5", "Map when each check happens during a build", "Work out when in the job each check is done — before the pour, before plastering, at handover. This decides when the app should prompt people.", "research", "Med", "backlog"),
-  card("R-6", "Look at what's already out there", "Check existing snagging and fire-stopping apps — what they do, what they miss, and where our angle is different.", "research", "Low", "backlog"),
+  // LAUNCH (Track 1 — start now)
+  card("LAU-1", "Set up sending inbox", "Create a real, personal-looking inbox (firstname@conform...) to send the interview invites from.", "launch", "High", "todo"),
+  card("LAU-2", "Set up calendar booking link", "Cal.com/Calendly 30-min interview slot. Share it only after a prospect says yes, never in Email 1.", "launch", "High", "todo"),
+  card("LAU-3", "Pull first contact batch", "Export 30-50 top-scored HRB contacts (names + emails) from the lead-gen tool; hand-check the top 10.", "launch", "High", "todo"),
+  card("LAU-4", "Send & run email sequence", "Send Email 1 and run the 4-touch interview-invite sequence ('The Building Safety Brief').", "launch", "High", "todo"),
+  card("LAU-5", "Run Call 1 interviews", "Book and run the recorded interviews; use the anchor question (~75% in) to transition to the free audit.", "launch", "High", "todo"),
 
-  // DESIGN
-  card("D-1", "Opening screen that lists the checks", "A simple home screen that lists the checks available and grows as we add more. Already built in the prototype.", "design", "Med", "doing"),
-  card("D-2", "Standard results layout for every check", "One consistent results screen: the overall verdict, how confident the app is, and a point-by-point checklist. Done in the prototype.", "design", "Med", "done"),
-  card("D-3", "PM report that sorts items by where to look", "The report the PM opens, split into 'Looks good — quick check', 'Needs your eyes', and 'Couldn't tell from the photos'. Should be readable in ten seconds.", "design", "High", "backlog"),
-  card("D-4", "Name, logo and colours", "Decide the product name and a simple look ('CONFORM' is a placeholder for now).", "design", "Low", "backlog"),
+  // PITCH & SALES KIT
+  card("PIT-1", "Cold email sequence", "Done - 4-touch interview-invite sequence drafted (The Building Safety Brief).", "pitch", "Med", "done"),
+  card("PIT-2", "Call scripts", "Done - Call 1 interview + Call 2 audit/demo scripts drafted.", "pitch", "Med", "done"),
+  card("PIT-3", "Free audit definition + questions", "Done - Golden Thread Readiness audit scope + assessment questions drafted.", "pitch", "High", "done"),
+  card("PIT-4", "Objection-handling scripts", "Done - responses for the 8 common Call 2 objections.", "pitch", "Med", "done"),
+  card("PIT-5", "Pitch deck - full copy", "Done - build-ready copy for all 10 slides.", "pitch", "Med", "done"),
+  card("PIT-6", "Build the designed pitch deck", "Turn the slide copy into a designed deck in the Conform house style.", "pitch", "Med", "backlog"),
+  card("PIT-7", "Designed 1-page scorecard PDF", "Turn the scorecard template into a designed PDF leave-behind.", "pitch", "Med", "backlog"),
+  card("PIT-8", "Decide scorecard scoring model", "Choose R/A/G only vs a 0-100 composite score.", "pitch", "Low", "backlog"),
 
-  // CHECKS
-  card("C-1", "Plasterboard check", "Identify the board from a photo and confirm it's the right type for where it's being used. Prototype done.", "checks", "Med", "done"),
-  card("C-2", "ComFlor floor decking check", "Overall verdict plus a checklist covering bearing onto supports, fixings, side laps, shear studs, propping, damage, and water leakage. Prototype done.", "checks", "Med", "done"),
-  card("C-3", "Fire-stopping check — gaps around pipes and cables", "Spot unsealed gaps, the wrong or uncertified sealant, and missing fire collars where pipes and cables pass through fire walls and floors. Our highest-value check.", "checks", "High", "backlog"),
-  card("C-4", "Fire door check", "Check the gaps around the door, the intumescent strips, the closer, and the certification label.", "checks", "Med", "backlog"),
-  card("C-5", "Damp-proof course check", "Check the damp-proof course height above the ground and whether it's been bridged.", "checks", "Low", "backlog"),
+  // LEAD GENERATION
+  card("LG-1", "Lead-gen tool", "Done - Companies House + Google + scoring; outputs named contacts with emails.", "leadgen", "Med", "done"),
+  card("LG-2", "Tune scoring for HRB developers", "Adjust the scoring to surface HRB developers / dutyholders first.", "leadgen", "High", "todo"),
+  card("LG-3", "Lead-gen -> CRM integration", "Build the pipe from the lead-gen tool into the CRM (self-build, timing TBD).", "leadgen", "Low", "backlog"),
 
-  // SCANNING
-  card("S-1", "Take a photo or pick one from the phone", "Let someone snap a photo or choose one from their phone, ready to be checked. Done.", "scanning", "Med", "done"),
-  card("S-2", "Turn the photo into a clear result", "Send the photo to the AI and get back a clear, structured result for the screen. Done.", "scanning", "High", "done"),
-  card("S-3", "Never guess measurements", "The AI can't measure a gap or a bearing length from a photo without something for scale. Never show exact measurements — flag them for the PM to check by hand, or ask for a known-size card in the shot.", "scanning", "High", "backlog"),
-  card("S-4", "Make the photos trustworthy as evidence", "Because the person doing the work may also take the photo, use the live camera only with the time and location stamped on it, so shots can't be staged. The PM spot-checks the rest.", "scanning", "Med", "backlog"),
-  card("S-5", "Ask for more photos when one isn't enough", "The 'add more photos or report anyway' steps built for the decking check should work for every check.", "scanning", "Med", "backlog"),
-  card("S-6", "Handle things going wrong", "Clear messages and an easy retry for a blurry photo, no phone signal, or the AI not responding.", "scanning", "Med", "backlog"),
+  // CRM
+  card("CRM-1", "Stand up a simple pipeline tracker", "Interim one-sheet tracker: sent -> replied -> Call 1 -> Call 2 -> proposal -> won/lost. Don't let 'build a CRM' block outreach.", "crm", "High", "todo"),
+  card("CRM-2", "Decide CRM approach", "Build your own vs an off-the-shelf tool.", "crm", "Med", "backlog"),
+  card("CRM-3", "Build the CRM", "Build the chosen CRM.", "crm", "Low", "backlog"),
 
-  // INSPECTION LOG
-  card("L-1", "Save each check as a record", "Keep the photos, verdict, checklist, time and location together as one inspection record.", "log", "High", "backlog"),
-  card("L-2", "A list of past checks for each job", "See the history of checks on a site so nothing gets lost.", "log", "High", "backlog"),
-  card("L-3", "Save a check as a shareable PDF", "A tidy PDF the PM can file as proof — the kind of record the Building Safety Act expects (the 'golden thread').", "log", "High", "backlog"),
-  card("L-4", "PM 'checked on site' tick", "When the PM verifies an item in person, they tick it off. That tick — with the photo, the app's view and the time — becomes the real sign-off record.", "log", "High", "backlog"),
-  card("L-5", "Group records by site", "Organise checks under each job so a site's full history sits in one place.", "log", "Med", "backlog"),
+  // PRODUCT
+  card("PRD-1", "Compliance demo ready", "Done - the existing Conform Compliance product is demo-ready (used in Call 2).", "product", "High", "done"),
+  card("PRD-2", "Define extra demo features", "Specify the additional features to add to the Compliance demo.", "product", "Med", "backlog"),
+  card("PRD-3", "Build extra Compliance features", "Build the additional features feeding into the Compliance demo.", "product", "Med", "doing"),
+  card("PRD-4", "Architect shared evidence-record schema", "Design the shared data model underpinning Products A/B/C.", "product", "Low", "backlog"),
+  card("PRD-5", "Product A - Site Diary demo MVP", "Deferred until post-launch / a paying client needs it.", "product", "Low", "backlog"),
 
-  // ACCOUNTS & DATA
-  card("A-1", "Two types of user: site team and PM", "Let a site person log in to capture and upload, and a PM log in to review and sign off.", "accounts", "High", "backlog"),
-  card("A-2", "Store photos and records safely online", "Move records off a single phone so they're safe and everyone sees the same thing.", "accounts", "Med", "backlog"),
-  card("A-3", "Data and privacy", "Site photos can be sensitive. Agree how data is stored, who owns it and how long it's kept, follow the data-protection rules (GDPR), and write a privacy policy.", "accounts", "Med", "backlog"),
-  card("A-4", "Works with no signal, uploads later", "Sites often have poor signal — let people capture offline and upload once they're back on data.", "accounts", "Low", "backlog"),
+  // WEBSITE
+  card("WEB-1", "Audit landing page", "Add a 'Golden Thread Readiness audit' landing page the cold emails can point to.", "website", "Med", "backlog"),
+  card("WEB-2", "Website credibility pass", "Light pass; show the suite as flagship Compliance + complementary modules (in development).", "website", "Med", "backlog"),
+  card("WEB-3", "Product pages for A / C", "Full product pages for Product A and Product C. Post-launch.", "website", "Low", "backlog"),
 
-  // LAUNCH
-  card("X-1", "Get the terms and disclaimers checked", "Make it clear the app is a helper and the PM signs off. Get the terms and the on-screen wording checked by someone qualified.", "launch", "High", "backlog"),
-  card("X-2", "Get one or two sites to trial it", "Find real sites to try the first check and give honest feedback.", "launch", "High", "backlog"),
-  card("X-3", "Work out pricing", "Per person, per site, or per check? Test what a PM would actually pay. Likely the PM or company pays and site teams are free.", "launch", "Med", "backlog"),
-  card("X-4", "Make it work like an app without the app store", "For the first version, a web link people add to their phone's home screen — no app-store wait.", "launch", "Med", "backlog"),
-  card("X-5", "Simple website and waitlist", "A basic page explaining the app and collecting interested sites.", "launch", "Low", "backlog"),
+  // BUSINESS FOUNDATIONS (Track 3 — before first signed build)
+  card("BIZ-1", "UK incorporation", "Set up the company. Week-1 task.", "business", "High", "todo"),
+  card("BIZ-2", "Bank account + invoicing", "Business bank account and the ability to invoice / take payment.", "business", "High", "todo"),
+  card("BIZ-3", "Professional indemnity insurance", "PI cover for compliance advice. Highest lead-time item and non-negotiable - start the quotes now.", "business", "High", "todo"),
+  card("BIZ-4", "Set committed pricing", "Decide prices you'll quote out loud: discovery / build / retainer.", "business", "Med", "backlog"),
+  card("BIZ-5", "One-page SOW / proposal template", "Scope, deliverables, price, timeline + the advisory-aid disclaimer.", "business", "Med", "backlog"),
 ];
+
+/* ---- import/export helpers ---- */
+const epicKeys = Object.keys(EPICS);
+const PRIO_MAP = { p0: "High", p1: "Med", p2: "Low", high: "High", med: "Med", medium: "Med", low: "Low" };
+const COL_MAP = {
+  backlog: "backlog", parked: "backlog",
+  todo: "todo", "to do": "todo", "this week": "todo", thisweek: "todo",
+  doing: "doing", "in progress": "doing", inprogress: "doing",
+  done: "done",
+};
+const normPrio = (p) => PRIO_MAP[String(p || "").trim().toLowerCase()] || "Med";
+const normCol = (c) => COL_MAP[String(c || "").trim().toLowerCase()] || "backlog";
+const normEpic = (e) => {
+  const s = String(e || "").trim().toLowerCase().replace(/[^a-z]/g, "");
+  if (EPICS[s]) return s;
+  const found = epicKeys.find((k) => s === k || s.startsWith(k));
+  return found || "business";
+};
+const normCard = (raw) => ({
+  id: uid(),
+  ref: raw.ref || "IMP",
+  title: String(raw.title || "").trim(),
+  desc: String(raw.desc != null ? raw.desc : raw.description || "").trim(),
+  epic: normEpic(raw.epic != null ? raw.epic : raw.lane),
+  priority: normPrio(raw.priority),
+  col: normCol(raw.col != null ? raw.col : raw.column),
+});
 
 /* ================================================================== */
 /*  Styles                                                             */
@@ -162,10 +189,12 @@ const CSS = `
 .kb-btn-primary{background:var(--ink);color:#fff;border-color:var(--ink);}
 .kb-btn-ghost{background:var(--surface);color:var(--ink);}
 
-.kb-foot{display:flex;align-items:center;justify-content:space-between;margin-top:24px;padding-top:16px;border-top:1px solid var(--line);}
+.kb-foot{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-top:24px;padding-top:16px;border-top:1px solid var(--line);}
+.kb-foot-actions{display:flex;align-items:center;gap:14px;}
 .kb-stat{font-size:12px;color:var(--muted);}
 .kb-reset{background:none;border:none;color:var(--muted);font-family:inherit;font-size:12px;cursor:pointer;display:flex;align-items:center;gap:5px;}
-.kb-reset:hover{color:#9B2C2C;}
+.kb-reset:hover{color:var(--ink);}
+.kb-reset.danger:hover{color:#9B2C2C;}
 .kb-loading{text-align:center;color:var(--muted);padding:60px 0;font-size:14px;}
 
 /* ---- WIDE: Jira-style side-by-side columns when there's room ---- */
@@ -187,7 +216,7 @@ const CSS = `
 function CardForm({ initial, defaultCol, onSave, onCancel }) {
   const [title, setTitle] = useState(initial ? initial.title : "");
   const [desc, setDesc] = useState(initial ? initial.desc : "");
-  const [epic, setEpic] = useState(initial ? initial.epic : "checks");
+  const [epic, setEpic] = useState(initial ? initial.epic : "launch");
   const [priority, setPriority] = useState(initial ? initial.priority : "Med");
   return (
     <div className="kb-form">
@@ -225,6 +254,7 @@ export default function Kanban() {
   const [expanded, setExpanded] = useState({});
   const [dragId, setDragId] = useState(null);
   const [overCol, setOverCol] = useState(null);
+  const fileRef = useRef(null);
 
   useEffect(() => {
     try {
@@ -264,6 +294,36 @@ export default function Kanban() {
     }
   };
 
+  const exportBoard = () => {
+    const data = cards.map(({ ref, title, desc, epic, priority, col }) => ({ ref, title, desc, epic, priority, col }));
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "conform-board.json";
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const onImportFile = (e) => {
+    const f = e.target.files && e.target.files[0];
+    if (!f) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const data = JSON.parse(reader.result);
+        const arr = Array.isArray(data) ? data : (Array.isArray(data.cards) ? data.cards : []);
+        const next = arr.map(normCard).filter((c) => c.title);
+        if (!next.length) { window.alert("No valid tickets found in that file."); }
+        else if (window.confirm("Import " + next.length + " tickets? This replaces the current board.")) { persist(next); }
+      } catch {
+        window.alert("That file isn't valid JSON.");
+      }
+      e.target.value = "";
+    };
+    reader.readAsText(f);
+  };
+
   if (loading) return <div className="kb"><style>{CSS}</style><div className="kb-shell"><div className="kb-loading">Loading board…</div></div></div>;
 
   const inCol = (col) => cards.filter((c) => c.col === col && (filter === "all" || c.epic === filter));
@@ -277,9 +337,9 @@ export default function Kanban() {
           <div className="kb-brand"><span className="kb-dot" /> CONFORM · BOARD</div>
           <button className="kb-addbtn" onClick={() => { setAddingCol("backlog"); setActiveCol("backlog"); }}><Plus size={15} /> New ticket</button>
         </div>
-        <p className="kb-sub">Tap a column tab to switch. Drag a card or use the arrows to move it along — everything saves as you go.</p>
+        <p className="kb-sub">Filter by workstream, tap a column to switch, drag a card or use the arrows to move it — everything saves as you go.</p>
 
-        {/* epic filters */}
+        {/* workstream filters */}
         <div className="kb-filters">
           <button className={"kb-fchip" + (filter === "all" ? " active" : "")} onClick={() => setFilter("all")}>All</button>
           {Object.keys(EPICS).map((k) => (
@@ -359,7 +419,12 @@ export default function Kanban() {
 
         <div className="kb-foot">
           <span className="kb-stat">{cards.length} tickets · {doneCount} done</span>
-          <button className="kb-reset" onClick={resetBoard}><RotateCcw size={13} /> Reset to starter backlog</button>
+          <div className="kb-foot-actions">
+            <button className="kb-reset" onClick={exportBoard} title="Download the board as JSON"><Download size={13} /> Export</button>
+            <button className="kb-reset" onClick={() => fileRef.current && fileRef.current.click()} title="Load tickets from a JSON file"><Upload size={13} /> Import</button>
+            <button className="kb-reset danger" onClick={resetBoard}><RotateCcw size={13} /> Reset</button>
+          </div>
+          <input ref={fileRef} type="file" accept="application/json,.json" style={{ display: "none" }} onChange={onImportFile} />
         </div>
       </div>
     </div>
