@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
+import { createClient } from "@supabase/supabase-js";
 import {
   Plus,
   ChevronLeft,
@@ -13,13 +14,22 @@ import {
   GripVertical,
   Download,
   Upload,
+  Link as LinkIcon,
+  Paperclip,
 } from "lucide-react";
+
+/* ================================================================== */
+/*  Supabase (shared online store)                                     */
+/* ================================================================== */
+
+const SUPABASE_URL = "https://nfmwqgueipvdcdcfuquz.supabase.co";
+const SUPABASE_KEY = "sb_publishable_korpodp21OnaN4tOiH8FYg_VKU4FYQW";
+const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
+const BUCKET = "attachments";
 
 /* ================================================================== */
 /*  Config                                                             */
 /* ================================================================== */
-
-const STORAGE_KEY = "conform-kanban-v4";
 
 const COLUMNS = [
   { key: "backlog", label: "Backlog" },
@@ -43,7 +53,7 @@ const PRIORITY = { High: "#9B2C2C", Med: "#B0731A", Low: "#8A867D" };
 
 let _n = 0;
 const uid = () => Date.now().toString(36) + (_n++).toString(36);
-const card = (ref, title, desc, epic, priority, col) => ({ id: uid(), ref, title, desc, epic, priority, col });
+const card = (ref, title, desc, epic, priority, col) => ({ id: uid(), ref, title, desc, epic, priority, col, attachments: [] });
 
 const DEFAULT_CARDS = [
   // LAUNCH (Track 1 — start now)
@@ -93,7 +103,31 @@ const DEFAULT_CARDS = [
   card("BIZ-5", "One-page SOW / proposal template", "Scope, deliverables, price, timeline + the advisory-aid disclaimer.", "business", "Med", "backlog"),
 ];
 
-/* ---- import/export helpers ---- */
+/* ---- row <-> card mapping (DB column is `descr`) ---- */
+const rowToCard = (r) => ({
+  id: r.id,
+  ref: r.ref || "",
+  title: r.title || "",
+  desc: r.descr || "",
+  epic: r.epic || "business",
+  priority: r.priority || "Med",
+  col: r.col || "backlog",
+  attachments: Array.isArray(r.attachments) ? r.attachments : [],
+  position: r.position != null ? r.position : 0,
+});
+const cardToRow = (c) => ({
+  id: c.id,
+  ref: c.ref || "",
+  title: c.title || "",
+  descr: c.desc || "",
+  epic: c.epic,
+  priority: c.priority,
+  col: c.col,
+  attachments: c.attachments || [],
+  position: c.position != null ? c.position : 0,
+});
+
+/* ---- import helpers ---- */
 const epicKeys = Object.keys(EPICS);
 const PRIO_MAP = { p0: "High", p1: "Med", p2: "Low", high: "High", med: "Med", medium: "Med", low: "Low" };
 const COL_MAP = {
@@ -118,6 +152,7 @@ const normCard = (raw) => ({
   epic: normEpic(raw.epic != null ? raw.epic : raw.lane),
   priority: normPrio(raw.priority),
   col: normCol(raw.col != null ? raw.col : raw.column),
+  attachments: Array.isArray(raw.attachments) ? raw.attachments : [],
 });
 
 /* ================================================================== */
@@ -142,7 +177,6 @@ const CSS = `
 .kb-fchip.active{background:var(--ink);color:#fff;border-color:var(--ink);}
 .kb-edot{width:8px;height:8px;border-radius:50%;flex:0 0 auto;}
 
-/* column tabs — shown only on narrow widths */
 .kb-tabs{display:flex;gap:8px;margin:10px 0 2px;overflow-x:auto;padding-bottom:4px;}
 .kb-tab{flex:0 0 auto;font-size:13px;font-weight:600;border:1px solid var(--line);background:var(--surface);border-radius:11px;padding:9px 13px;cursor:pointer;font-family:inherit;color:var(--ink);display:flex;align-items:center;gap:7px;transition:border-color .15s ease;}
 .kb-tab.active{background:var(--ink);color:#fff;border-color:var(--ink);}
@@ -172,6 +206,22 @@ const CSS = `
 .kb-eptag{font-size:11px;color:var(--muted);margin-left:auto;display:flex;align-items:center;gap:5px;}
 .kb-title{font-size:15.5px;font-weight:600;line-height:1.35;margin:0;cursor:pointer;}
 .kb-desc{font-size:13.5px;color:var(--muted);line-height:1.55;margin:9px 0 0;}
+.kb-attbadge{font-size:11px;color:var(--muted);display:inline-flex;align-items:center;gap:3px;margin-left:6px;}
+
+.kb-detail{margin-top:9px;}
+.kb-atts{display:flex;flex-direction:column;gap:6px;margin:10px 0 0;}
+.kb-att{display:flex;align-items:center;gap:6px;}
+.kb-att-link{font-size:13px;color:#2F6FB0;text-decoration:none;word-break:break-all;display:flex;align-items:center;gap:5px;}
+.kb-att-link:hover{text-decoration:underline;}
+.kb-att-x{background:none;border:none;cursor:pointer;color:var(--muted);display:flex;padding:2px;flex:0 0 auto;}
+.kb-att-x:hover{color:#9B2C2C;}
+.kb-att-add{display:flex;flex-direction:column;gap:6px;margin-top:10px;padding-top:10px;border-top:1px dashed var(--line);}
+.kb-att-input{width:100%;border:1px solid var(--line);border-radius:8px;padding:8px;font-family:inherit;font-size:13px;background:var(--paper);color:var(--ink);}
+.kb-att-btns{display:flex;gap:6px;}
+.kb-att-btn{flex:1;border:1px solid var(--line);background:var(--surface);border-radius:8px;padding:7px;font-family:inherit;font-size:12.5px;cursor:pointer;color:var(--ink);display:flex;align-items:center;justify-content:center;gap:5px;}
+.kb-att-btn:hover{border-color:var(--ink);}
+.kb-att-btn:disabled{opacity:.5;cursor:default;}
+
 .kb-card-actions{display:flex;align-items:center;gap:6px;margin-top:12px;padding-top:11px;border-top:1px solid var(--line);}
 .kb-iconbtn{background:none;border:1px solid var(--line);border-radius:9px;width:34px;height:34px;display:flex;align-items:center;justify-content:center;cursor:pointer;color:var(--ink);transition:border-color .15s ease;}
 .kb-iconbtn:hover{border-color:var(--ink);}
@@ -197,7 +247,6 @@ const CSS = `
 .kb-reset.danger:hover{color:#9B2C2C;}
 .kb-loading{text-align:center;color:var(--muted);padding:60px 0;font-size:14px;}
 
-/* ---- WIDE: Jira-style side-by-side columns when there's room ---- */
 @media (min-width:900px){
   .kb-shell{max-width:1180px;}
   .kb-tabs{display:none;}
@@ -241,6 +290,27 @@ function CardForm({ initial, defaultCol, onSave, onCancel }) {
 }
 
 /* ================================================================== */
+/*  Attachment adder                                                   */
+/* ================================================================== */
+
+function AttachmentAdder({ onLink, onUpload, busy }) {
+  const [url, setUrl] = useState("");
+  const [label, setLabel] = useState("");
+  const fileRef = useRef(null);
+  return (
+    <div className="kb-att-add">
+      <input className="kb-att-input" placeholder="Paste a link (e.g. a Google Drive link)" value={url} onChange={(e) => setUrl(e.target.value)} />
+      <input className="kb-att-input" placeholder="Label (optional, e.g. 'Call scripts')" value={label} onChange={(e) => setLabel(e.target.value)} />
+      <div className="kb-att-btns">
+        <button className="kb-att-btn" onClick={() => { if (url.trim()) { onLink(url.trim(), label.trim()); setUrl(""); setLabel(""); } }}><LinkIcon size={13} /> Add link</button>
+        <button className="kb-att-btn" disabled={busy} onClick={() => fileRef.current && fileRef.current.click()}><Paperclip size={13} /> {busy ? "Uploading…" : "Upload file"}</button>
+        <input ref={fileRef} type="file" style={{ display: "none" }} onChange={(e) => { const f = e.target.files && e.target.files[0]; if (f) onUpload(f); e.target.value = ""; }} />
+      </div>
+    </div>
+  );
+}
+
+/* ================================================================== */
 /*  Main                                                               */
 /* ================================================================== */
 
@@ -254,68 +324,122 @@ export default function Kanban() {
   const [expanded, setExpanded] = useState({});
   const [dragId, setDragId] = useState(null);
   const [overCol, setOverCol] = useState(null);
-  const fileRef = useRef(null);
+  const [uploadingId, setUploadingId] = useState(null);
+  const importRef = useRef(null);
 
+  /* ---- load from Supabase (seed on first run) ---- */
   useEffect(() => {
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      if (raw) setCards(JSON.parse(raw));
-      else throw new Error("seed");
-    } catch {
-      setCards(DEFAULT_CARDS);
-      try { localStorage.setItem(STORAGE_KEY, JSON.stringify(DEFAULT_CARDS)); } catch (e) {}
-    }
-    setLoading(false);
+    (async () => {
+      try {
+        const { data, error } = await supabase.from("cards").select("*").order("position", { ascending: true });
+        if (error) throw error;
+        if (data && data.length) {
+          setCards(data.map(rowToCard));
+        } else {
+          const seed = DEFAULT_CARDS.map((c, i) => ({ ...c, position: i }));
+          await supabase.from("cards").insert(seed.map(cardToRow));
+          setCards(seed);
+        }
+      } catch (e) {
+        console.error("Supabase load failed, showing local copy:", e);
+        setCards(DEFAULT_CARDS.map((c, i) => ({ ...c, position: i })));
+      }
+      setLoading(false);
+    })();
   }, []);
 
-  const persist = (next) => {
-    setCards(next);
-    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(next)); } catch (e) {}
-  };
-  const move = (id, dir) => {
-    let landed = null;
-    const next = cards.map((c) => {
-      if (c.id !== id) return c;
-      const idx = COLUMNS.findIndex((k) => k.key === c.col);
-      const ni = Math.min(COLUMNS.length - 1, Math.max(0, idx + dir));
-      landed = COLUMNS[ni].key;
-      return { ...c, col: landed };
-    });
-    persist(next);
-    if (landed) setActiveCol(landed); // follow the card on narrow view
-  };
-  const moveTo = (id, col) => persist(cards.map((c) => (c.id === id ? { ...c, col } : c)));
-  const remove = (id) => persist(cards.filter((c) => c.id !== id));
-  const saveEdit = (id, data) => { persist(cards.map((c) => (c.id === id ? { ...c, ...data } : c))); setEditingId(null); };
-  const addCard = (data) => { persist([{ id: uid(), ref: "NEW", ...data }, ...cards]); setAddingCol(null); setActiveCol(data.col); };
-  const resetBoard = () => {
-    if (window.confirm("Reset the board to the starter backlog? Your changes will be lost.")) {
-      persist(DEFAULT_CARDS.map((c) => ({ ...c, id: uid() })));
-    }
+  /* ---- writes ---- */
+  const patchLocal = (id, patch) => setCards((cs) => cs.map((c) => (c.id === id ? { ...c, ...patch } : c)));
+  const dbUpdate = async (id, patch) => {
+    const map = { title: "title", desc: "descr", epic: "epic", priority: "priority", col: "col", attachments: "attachments", position: "position", ref: "ref" };
+    const row = {};
+    Object.keys(patch).forEach((k) => { if (map[k]) row[map[k]] = patch[k]; });
+    row.updated_at = new Date().toISOString();
+    const { error } = await supabase.from("cards").update(row).eq("id", id);
+    if (error) console.error("save failed:", error);
   };
 
+  const move = (id, dir) => {
+    const c = cards.find((x) => x.id === id);
+    if (!c) return;
+    const idx = COLUMNS.findIndex((k) => k.key === c.col);
+    const col = COLUMNS[Math.min(COLUMNS.length - 1, Math.max(0, idx + dir))].key;
+    patchLocal(id, { col });
+    dbUpdate(id, { col });
+    setActiveCol(col);
+  };
+  const moveTo = (id, col) => { patchLocal(id, { col }); dbUpdate(id, { col }); };
+  const remove = async (id) => { setCards((cs) => cs.filter((c) => c.id !== id)); await supabase.from("cards").delete().eq("id", id); };
+  const saveEdit = (id, data) => { patchLocal(id, data); dbUpdate(id, data); setEditingId(null); };
+  const addCard = async (data) => {
+    const minPos = cards.length ? Math.min(...cards.map((c) => c.position || 0)) : 0;
+    const newCard = { id: uid(), ref: "NEW", desc: "", attachments: [], position: minPos - 1, ...data };
+    setCards((cs) => [newCard, ...cs]);
+    setAddingCol(null);
+    setActiveCol(newCard.col);
+    const { error } = await supabase.from("cards").insert(cardToRow(newCard));
+    if (error) console.error("add failed:", error);
+  };
+  const resetBoard = async () => {
+    if (!window.confirm("Reset the board to the starter backlog? Everyone's changes will be lost.")) return;
+    const seed = DEFAULT_CARDS.map((c, i) => ({ ...c, id: uid(), position: i }));
+    await supabase.from("cards").delete().not("id", "is", null);
+    await supabase.from("cards").insert(seed.map(cardToRow));
+    setCards(seed);
+  };
+
+  /* ---- attachments ---- */
+  const setAttachments = (id, attachments) => { patchLocal(id, { attachments }); dbUpdate(id, { attachments }); };
+  const addLink = (id, url, label) => {
+    const c = cards.find((x) => x.id === id); if (!c) return;
+    setAttachments(id, [...(c.attachments || []), { type: "link", label: label || url, url }]);
+  };
+  const removeAttachment = (id, i) => {
+    const c = cards.find((x) => x.id === id); if (!c) return;
+    setAttachments(id, (c.attachments || []).filter((_, j) => j !== i));
+  };
+  const uploadFile = async (id, file) => {
+    setUploadingId(id);
+    try {
+      const path = id + "/" + Date.now() + "-" + file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
+      const { error } = await supabase.storage.from(BUCKET).upload(path, file);
+      if (error) {
+        window.alert("Upload failed: " + error.message + "\n(If this says the bucket is missing, create a public bucket called 'attachments' in Supabase.)");
+      } else {
+        const { data } = supabase.storage.from(BUCKET).getPublicUrl(path);
+        const c = cards.find((x) => x.id === id);
+        if (c) setAttachments(id, [...(c.attachments || []), { type: "file", label: file.name, url: data.publicUrl }]);
+      }
+    } catch (e) {
+      window.alert("Upload failed.");
+    }
+    setUploadingId(null);
+  };
+
+  /* ---- export / import ---- */
   const exportBoard = () => {
-    const data = cards.map(({ ref, title, desc, epic, priority, col }) => ({ ref, title, desc, epic, priority, col }));
+    const data = cards.map(({ ref, title, desc, epic, priority, col, attachments }) => ({ ref, title, desc, epic, priority, col, attachments }));
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
-    a.href = url;
-    a.download = "conform-board.json";
-    a.click();
+    a.href = url; a.download = "conform-board.json"; a.click();
     URL.revokeObjectURL(url);
   };
-
   const onImportFile = (e) => {
     const f = e.target.files && e.target.files[0];
     if (!f) return;
     const reader = new FileReader();
-    reader.onload = () => {
+    reader.onload = async () => {
       try {
         const data = JSON.parse(reader.result);
         const arr = Array.isArray(data) ? data : (Array.isArray(data.cards) ? data.cards : []);
-        const next = arr.map(normCard).filter((c) => c.title);
+        const next = arr.map((raw, i) => ({ ...normCard(raw), position: i })).filter((c) => c.title);
         if (!next.length) { window.alert("No valid tickets found in that file."); }
-        else if (window.confirm("Import " + next.length + " tickets? This replaces the current board.")) { persist(next); }
+        else if (window.confirm("Import " + next.length + " tickets? This replaces the current board for everyone.")) {
+          await supabase.from("cards").delete().not("id", "is", null);
+          await supabase.from("cards").insert(next.map(cardToRow));
+          setCards(next);
+        }
       } catch {
         window.alert("That file isn't valid JSON.");
       }
@@ -337,9 +461,8 @@ export default function Kanban() {
           <div className="kb-brand"><span className="kb-dot" /> CONFORM · BOARD</div>
           <button className="kb-addbtn" onClick={() => { setAddingCol("backlog"); setActiveCol("backlog"); }}><Plus size={15} /> New ticket</button>
         </div>
-        <p className="kb-sub">Filter by workstream, tap a column to switch, drag a card or use the arrows to move it — everything saves as you go.</p>
+        <p className="kb-sub">Filter by workstream, tap a column to switch, drag a card or use the arrows to move it. Open a card to add links or files — everything saves online.</p>
 
-        {/* workstream filters */}
         <div className="kb-filters">
           <button className={"kb-fchip" + (filter === "all" ? " active" : "")} onClick={() => setFilter("all")}>All</button>
           {Object.keys(EPICS).map((k) => (
@@ -349,7 +472,6 @@ export default function Kanban() {
           ))}
         </div>
 
-        {/* column tabs (narrow only) */}
         <div className="kb-tabs">
           {COLUMNS.map((c) => (
             <button key={c.key} className={"kb-tab" + (activeCol === c.key ? " active" : "")} onClick={() => setActiveCol(c.key)}>
@@ -382,6 +504,7 @@ export default function Kanban() {
                     const ep = EPICS[c.epic] || { label: c.epic, color: "#999" };
                     const idx = COLUMNS.findIndex((k) => k.key === c.col);
                     const isOpen = !!expanded[c.id];
+                    const atts = c.attachments || [];
                     if (editingId === c.id) return <CardForm key={c.id} initial={c} onSave={(d) => saveEdit(c.id, d)} onCancel={() => setEditingId(null)} />;
                     return (
                       <div
@@ -398,12 +521,33 @@ export default function Kanban() {
                           <span className="kb-prio" style={{ background: PRIORITY[c.priority] || "#888" }}>{c.priority}</span>
                           <span className="kb-eptag"><span className="kb-edot" style={{ background: ep.color }} />{ep.label}</span>
                         </div>
-                        <p className="kb-title" onClick={() => setExpanded({ ...expanded, [c.id]: !isOpen })}>{c.title}</p>
-                        {c.desc && isOpen && <p className="kb-desc">{c.desc}</p>}
+                        <p className="kb-title" onClick={() => setExpanded({ ...expanded, [c.id]: !isOpen })}>
+                          {c.title}
+                          {atts.length > 0 && <span className="kb-attbadge"><Paperclip size={11} />{atts.length}</span>}
+                        </p>
+                        {isOpen && (
+                          <div className="kb-detail">
+                            {c.desc && <p className="kb-desc">{c.desc}</p>}
+                            {atts.length > 0 && (
+                              <div className="kb-atts">
+                                {atts.map((a, i) => (
+                                  <div className="kb-att" key={i}>
+                                    <a className="kb-att-link" href={a.url} target="_blank" rel="noreferrer">
+                                      {a.type === "file" ? <Paperclip size={12} /> : <LinkIcon size={12} />}{a.label || a.url}
+                                    </a>
+                                    <span className="kb-spacer" />
+                                    <button className="kb-att-x" onClick={() => removeAttachment(c.id, i)} title="Remove"><X size={13} /></button>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                            <AttachmentAdder busy={uploadingId === c.id} onLink={(url, label) => addLink(c.id, url, label)} onUpload={(file) => uploadFile(c.id, file)} />
+                          </div>
+                        )}
                         <div className="kb-card-actions">
                           <button className="kb-iconbtn" disabled={idx === 0} onClick={() => move(c.id, -1)} title="Move back"><ChevronLeft size={16} /></button>
                           <button className="kb-iconbtn" disabled={idx === COLUMNS.length - 1} onClick={() => move(c.id, 1)} title="Move forward"><ChevronRight size={16} /></button>
-                          {c.desc && <button className="kb-iconbtn" onClick={() => setExpanded({ ...expanded, [c.id]: !isOpen })} title="Details">{isOpen ? <ChevronUp size={15} /> : <ChevronDown size={15} />}</button>}
+                          <button className="kb-iconbtn" onClick={() => setExpanded({ ...expanded, [c.id]: !isOpen })} title="Details / attachments">{isOpen ? <ChevronUp size={15} /> : <ChevronDown size={15} />}</button>
                           <span className="kb-spacer" />
                           <button className="kb-iconbtn" onClick={() => setEditingId(c.id)} title="Edit"><Pencil size={14} /></button>
                           <button className="kb-iconbtn danger" onClick={() => remove(c.id)} title="Delete"><Trash2 size={14} /></button>
@@ -418,13 +562,13 @@ export default function Kanban() {
         </div>
 
         <div className="kb-foot">
-          <span className="kb-stat">{cards.length} tickets · {doneCount} done</span>
+          <span className="kb-stat">{cards.length} tickets · {doneCount} done · saved online</span>
           <div className="kb-foot-actions">
             <button className="kb-reset" onClick={exportBoard} title="Download the board as JSON"><Download size={13} /> Export</button>
-            <button className="kb-reset" onClick={() => fileRef.current && fileRef.current.click()} title="Load tickets from a JSON file"><Upload size={13} /> Import</button>
+            <button className="kb-reset" onClick={() => importRef.current && importRef.current.click()} title="Load tickets from a JSON file"><Upload size={13} /> Import</button>
             <button className="kb-reset danger" onClick={resetBoard}><RotateCcw size={13} /> Reset</button>
           </div>
-          <input ref={fileRef} type="file" accept="application/json,.json" style={{ display: "none" }} onChange={onImportFile} />
+          <input ref={importRef} type="file" accept="application/json,.json" style={{ display: "none" }} onChange={onImportFile} />
         </div>
       </div>
     </div>
